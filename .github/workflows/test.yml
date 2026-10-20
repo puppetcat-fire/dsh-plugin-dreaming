@@ -1,0 +1,21 @@
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit:
+    # The plugin is plain JavaScript; the suite is verified on Windows and is
+    # platform-independent by design (temp dirs only, no runtime state).
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Syntax check
+        run: node --check index.js && node --check client.js
+      - name: Unit tests
+        run: npm test

@@ -1,0 +1,4 @@
+# Dreaming bundle: one global Host plugin plus its Client dashboard.
+- insert:
+    - id: dreaming
+      name: 'dsh-plugin-dreaming'

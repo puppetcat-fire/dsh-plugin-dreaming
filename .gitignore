@@ -1,0 +1,8 @@
+node_modules/
+*.tgz
+.pnpm-store/
+.plugin-market-cache/
+coverage/
+*.log
+.DS_Store
+Thumbs.db
