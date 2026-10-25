@@ -1,7 +1,13 @@
 # Dreaming — architecture and contracts
 
-Status: implementation contract (v1), written against DSH 0.2.1-rc.2 and the Web profile. This document
-is the single source of truth for module boundaries.
+Status: implementation contract (v1), written against DSH 0.2.1-rc.2 and verified on 0.2.1-rc.3 with the
+Web profile. This document is the single source of truth for module boundaries.
+
+Compatibility baseline: extension points and data contracts below were re-verified live on
+`0.2.1-rc.3` (2026-10-24). The seven Harness packages this plugin depends on
+(`dsh-tools`, `dsh-system-prompt`, `dsh-skill`, `dsh-session`, `dsh-agent`, `dsh-llm`,
+`dsh-settings`) are unchanged between `0.2.1-rc.2` and `0.2.1-rc.3`; only `package.json`
+versions differ, plus removed build-only `lib/types/*` files.
 
 ## 1. What the plugin is for
 
@@ -55,10 +61,14 @@ reasoning) than the skill body it is meant to save. That contradicts the product
 - Everything is **sampled and budgeted**: per-hour probe cap, concurrent-LLM cap, per-day dream token
   budget, adaptive sampling (always probe skills with known gaps, sample healthy skills).
 
-## 3. Verified Harness extension points (0.2.1-rc.2)
+## 3. Verified Harness extension points (0.2.1-rc.3)
 
-Everything below was confirmed with `cordis_inspect_query` against the live Host. Do not substitute
-guesses; re-confirm with inspection if the runtime version changes.
+Everything below was confirmed with `cordis_inspect_query` and package-source diffs against the live
+Host. Do not substitute guesses; re-confirm with inspection if the runtime version changes.
+
+Re-checked on `0.2.1-rc.2 → 0.2.1-rc.3` (2026-10-24): every extension point in this table is intact.
+The plugin's Host packages are byte-identical across the two releases, so a future re-check should
+start with the same seven packages whenever DSH changes them.
 
 | Need | API |
 |---|---|
@@ -77,7 +87,7 @@ guesses; re-confirm with inspection if the runtime version changes.
 | Data directory | `process.env.DSH_HOME` (`~/.dsh`) + `/dreaming`; configurable |
 
 Module resolution: the plugin is a profile bundle. Declare every Harness package it imports as a
-`peerDependencies` entry with a broad, update-tolerant range (`">=0.2.0-0"` for `@deepseek-ai/dsh-*`;
+`peerDependencies` entry with a broad, update-tolerant range (`">=0.2.1-0"` for `@deepseek-ai/dsh-*`;
 `"*"` for `@deepseek-ai/cordis`, `@deepseek-ai/schemastery`) so the launcher's peer-aware runtime
 resolution serves them from the installation. Keep the import surface deliberately small:
 `@deepseek-ai/schemastery` (Config), `@deepseek-ai/dsh-tools` (`defineTool`), `@deepseek-ai/dsh-llm`

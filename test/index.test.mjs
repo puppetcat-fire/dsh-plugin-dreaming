@@ -41,7 +41,7 @@ function createFakeContext({ services = {} } = {}) {
       injections.push(dependencies)
       const available = dependencies.every((dependency) => services[dependency] !== undefined)
       if (!available) return undefined
-      const child = createFakeContext({ services })
+      const child = createFakeContext({ services }).ctx
       child.parent = ctx
       callback(child)
       return child
@@ -51,6 +51,10 @@ function createFakeContext({ services = {} } = {}) {
       if (typeof disposer === 'function') cleanups.push(disposer)
       return disposer
     },
+  }
+  // Injected services are reachable both through ctx.get(name) and as ctx.<name>.
+  for (const [name, service] of Object.entries(services)) {
+    if (!Object.hasOwn(ctx, name)) ctx[name] = service
   }
   return { ctx, listeners, sections, tools, cleanups, injections }
 }
@@ -85,6 +89,7 @@ test('apply registers the awareness section, the dreaming tool and the listeners
     })
     assert.equal(sections.length, 1)
     assert.equal(sections[0].name, 'dreaming:capability-awareness')
+    assert.equal(sections[0].interpolate, false, 'generated prose must stay out of {{variable}} interpolation')
     assert.equal(typeof sections[0].text, 'function')
     assert.equal(sections[0].text(), '')
     assert.equal(tools.length, 1)
@@ -104,6 +109,44 @@ test('apply registers the awareness section, the dreaming tool and the listeners
       }
     }
     rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the dashboard API is mounted only when api.enabled allows it', async () => {
+  const routes = []
+  const webServer = {
+    register(route) {
+      routes.push(route)
+      return () => {}
+    },
+  }
+  const dirA = mkdtempSync(join(tmpdir(), 'dreaming-index-api-off-'))
+  const dirB = mkdtempSync(join(tmpdir(), 'dreaming-index-api-on-'))
+  const off = createFakeContext({ services: { webServer } })
+  const on = createFakeContext({ services: { webServer } })
+  try {
+    apply(off.ctx, {
+      dataDir: dirA,
+      probe: { enabled: false },
+      judge: { enabled: false },
+      dream: { enabled: false },
+      api: { enabled: false },
+    })
+    assert.equal(routes.length, 0, 'api.enabled=false must not register the dashboard route')
+    apply(on.ctx, { dataDir: dirB, probe: { enabled: false }, judge: { enabled: false }, dream: { enabled: false } })
+    assert.equal(routes.length, 1, 'api.enabled defaults to true and mounts the dashboard route')
+    assert.equal(routes[0].kind, 'prefix')
+    assert.match(String(routes[0].path), /^\/dreaming\/api/)
+  } finally {
+    for (const cleanup of [...off.cleanups, ...on.cleanups]) {
+      try {
+        cleanup()
+      } catch {
+        // ignore
+      }
+    }
+    rmSync(dirA, { recursive: true, force: true })
+    rmSync(dirB, { recursive: true, force: true })
   }
 })
 

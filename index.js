@@ -189,6 +189,10 @@ export function apply(ctx, rawConfig) {
   ctx.systemPrompt.section({
     name: SECTION_NAME,
     order: AWARENESS_SECTION_ORDER,
+    // The generated text is literal model-facing prose (skill names, judge/dream free text). Keep it
+    // out of the Harness `{{variable}}` interpolation: an unregistered or malformed reference would
+    // otherwise throw during prompt assembly and fail every model request.
+    interpolate: false,
     text: () => guidanceCache.text(),
   })
 
@@ -301,6 +305,10 @@ export function apply(ctx, rawConfig) {
   }
 
   ctx.inject(['webServer'], (child) => {
+    if (config.api?.enabled === false) {
+      logger.info('dreaming: dashboard API disabled by configuration (api.enabled=false)')
+      return
+    }
     const dispose = installApi({
       ctx: child,
       config,
@@ -467,8 +475,9 @@ function buildDreamingTool({ ctx, config, store, tracker, dreamEngine, runDream,
     name: TOOL_NAME,
     description:
       'Report measured skill capability awareness ("consciousness strength"): how reliably each skill delivers what its description claims, the token waste observed, and the learned boundaries. Use action="status" for the overall picture, "gaps" for the skills that are most often mis-invoked, and "dream" to run one bounded, journaled dream pass that may refine skill descriptions and boundaries (it creates backups and is reversible). This tool reads the dreaming store; it does not change the current task unless action is "dream".',
-    // Raw wire schema: ToolRuntime.register() sends this verbatim to the provider and validates
-    // it with assertSupportedJsonSchema. It is deliberately NOT the defineTool DSL (which uses
+    // Raw wire schema: ToolRuntime.register() snapshots `parameters` as lossless JSON and sends it
+    // verbatim to the provider; `output.schema` is the part validated by
+    // assertSupportedJsonSchema. It is deliberately NOT the defineTool DSL (which uses
     // property-level `required: true` and is converted only by defineTool itself).
     parameters: {
       type: 'object',

@@ -313,7 +313,10 @@ window.__ModuleLoader__.load({
       try {
         const locale = typeof ctx?.get === 'function' ? ctx.get('locale') : undefined;
         const snapshot = typeof locale?.getLocale === 'function' ? locale.getLocale() : undefined;
-        if (snapshot && typeof snapshot.language === 'string') language = snapshot.language;
+        // The client locale snapshot carries the active id as `active`
+        // (`{ active, locales, revision }`); `language` is the older field name kept as a fallback.
+        const active = snapshot?.active ?? snapshot?.language;
+        if (typeof active === 'string') language = active;
       } catch {
         language = '';
       }

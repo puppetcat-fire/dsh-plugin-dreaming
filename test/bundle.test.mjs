@@ -125,6 +125,12 @@ test('the client half is a lazy ModuleLoader factory with only react and relativ
   assert.deepEqual(literalColors, [], 'client styles must use theme tokens, not literal colors')
 })
 
+test('the client reads the active locale id instead of the retired language field', () => {
+  const client = readFileSync(join(packageDir, 'client.js'), 'utf8')
+  assert.match(client, /snapshot\?\.active/, 'locale detection must read snapshot.active')
+  assert.ok(!/typeof snapshot\.language/.test(client), 'the retired snapshot.language field must not be the primary read')
+})
+
 test('the client registers with exactly the documented slot options', () => {
   const client = readFileSync(join(packageDir, 'client.js'), 'utf8')
   const registration = client.match(/ctx\.slots\.register\(\{([\s\S]*?)\},\s*\(props\)/)?.[1] ?? ''
