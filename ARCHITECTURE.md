@@ -197,8 +197,8 @@ fresh file.
 ```
 
 `wastedEstimate` is a conservative estimate set by the judge path: `skillLoad` when the verdict is
-`misapplied`, plus `reworkEstimate` when the model redid the work (tool sequence contains a repeated
-attempt after abandoning the skill). It is used for the dashboard and dream prioritisation only.
+`misapplied` or `missed`, plus `reworkEstimate` when the model redid the work (tool sequence contains a
+repeated attempt after abandoning the skill). It is used for the dashboard and dream prioritisation only.
 
 ### 5.2 `state.json` — capability beliefs and learned knowledge
 
@@ -499,7 +499,7 @@ Hard caps enforced by code:
 | Probe input | 6000 chars | ≈ 1500 tokens, sampled |
 | Probe output | 700 tokens | one JSON object |
 | Judge input | 9000 chars | ≈ 2200 tokens, once per loaded skill |
-| Judge output | 900 tokens | one JSON object |
+| Judge output | 1400 tokens | one JSON object; 900 truncated real verdicts |
 | Dream input | 16000 chars/skill | nightly, budgeted |
 | Dream output | 1800 tokens/skill | nightly, budgeted |
 

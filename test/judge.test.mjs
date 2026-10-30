@@ -321,7 +321,7 @@ test('judgeEpisode: missing llm route is contained as an error', async () => {
   assert.equal(episode.judge.status, 'error')
 })
 
-test('computeEpisodeCost: conservative semantics for matched, no-rework and missing body size', () => {
+test('computeEpisodeCost: conservative semantics for matched, missed, no-rework and missing body size', () => {
   const matched = makeEpisode({
     judge: { status: 'ok', verdict: 'matched', score: 92, rework: false },
     cost: null,
@@ -334,12 +334,24 @@ test('computeEpisodeCost: conservative semantics for matched, no-rework and miss
   const misapplied = makeEpisode({ judge: { status: 'ok', verdict: 'misapplied', rework: false } })
   assert.equal(computeEpisodeCost(misapplied).wastedEstimate, 1200)
 
+  const missed = makeEpisode({ judge: { status: 'ok', verdict: 'missed', rework: false } })
+  assert.equal(computeEpisodeCost(missed).wastedEstimate, 1200, 'a missed load wasted the skill body')
+
+  const missedWithRework = makeEpisode({ judge: { status: 'ok', verdict: 'missed', rework: true } })
+  assert.equal(
+    computeEpisodeCost(missedWithRework).wastedEstimate,
+    1200 + estimateTraceTokens(missedWithRework.trace),
+  )
+
   const unknownBody = makeEpisode({
     skillMeta: { ...makeEpisode().skillMeta, bodyChars: 0, bodyTokens: 0 },
     judge: { status: 'ok', verdict: 'misapplied', rework: false },
   })
   assert.equal(computeEpisodeCost(unknownBody).skillLoad, 0, 'missing body size yields 0, never a guess')
   assert.equal(computeEpisodeCost(unknownBody).wastedEstimate, 0)
+
+  const partialNoRework = makeEpisode({ judge: { status: 'ok', verdict: 'partial', rework: false } })
+  assert.equal(computeEpisodeCost(partialNoRework).wastedEstimate, 0, 'a partial match keeps its load cost')
 
   const partialWithRework = makeEpisode({ judge: { status: 'ok', verdict: 'partial', rework: true } })
   const partialCost = computeEpisodeCost(partialWithRework)

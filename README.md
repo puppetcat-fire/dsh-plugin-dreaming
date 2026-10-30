@@ -104,6 +104,8 @@ Each skill keeps a belief: load count, verdict distribution, fit history, cost, 
 | `confidence` | `<3 / <10 / ≥10 judged` → low / medium / high | How trustworthy is the score? |
 
 > No fake high score with few samples: `confidence = low` is reported, and both the panel and the model-facing text say so.
+>
+> Waste accounting: a call judged `misapplied` or `missed` counts its whole skill-body cost as wasted; `partial` only counts rework tokens when rework was actually observed.
 
 ### 5. Injection — give the truth before use
 
@@ -235,7 +237,7 @@ The panel only reads `/dreaming/api/*` (a Host prefix route: JSON only, Origin c
 
 Under the default configuration:
 
-- per skill load: one probe (≈1–2k input + ≤700 output tokens) and one judge (≈2–3k + ≤900);
+- per skill load: one probe (≈1–2k input + ≤700 output tokens) and one judge (≈2–3k + ≤1400);
 - per model request: the awareness section (≈100–300 tokens when data exists, refreshed at most every 10 minutes);
 - nightly: bounded by `dream.dailyTokenBudget`.
 

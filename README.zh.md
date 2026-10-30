@@ -97,6 +97,8 @@ user/agent ── skill ─┤ tools/pre-execute                        │
 | `confidence` | 判定样本 `<3 / <10 / ≥10` → low / medium / high | 这个分数可不可信 |
 
 > 样本不足时不会给出虚假的高分：`confidence = low`，面板和模型提示都会标明。
+>
+> 浪费口径：判定为 `misapplied` 或 `missed` 的调用，skill 正文 token 整体计入浪费；`partial` 只在确认发生返工时计入返工 token。
 
 ### 5. 注入：在使用前给出真相
 
@@ -230,7 +232,7 @@ Settings → **Dreaming · 意识强度**（`settings.section`，order 95）：
 
 默认配置下的固定开销：
 
-- 每次 skill 加载：一次 probe（约 1–2k 输入 + ≤700 输出 token），一次 judge（约 2–3k + ≤900）；
+- 每次 skill 加载：一次 probe（约 1–2k 输入 + ≤700 输出 token），一次 judge（约 2–3k + ≤1400）；
 - 每次模型请求：能力自知段落（有数据时约 100–300 token，10 分钟最多刷新一次）；
 - 夜间：受 `dream.dailyTokenBudget` 限制。
 
