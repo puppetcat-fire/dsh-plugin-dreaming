@@ -192,6 +192,55 @@ test('streamText: retries once on a retryable transport error', async () => {
   assert.equal(LLM_RETRY.maxAttempts, 2)
 })
 
+test('streamText: drops an effort the model rejects and retries with the inherited effort', async () => {
+  let attempts = 0
+  const ctx = makeCtx({
+    handler: (options) => {
+      attempts += 1
+      if (options.reasoningEffort !== undefined) {
+        return chunks([
+          { type: 'finish', reason: { kind: 'error', failure: { message: 'unsupported effort', code: 'UNSUPPORTED_REASONING_EFFORT' } } },
+        ])
+      }
+      return chunks(reply('inherited reply'))
+    },
+  })
+  const result = await streamText(ctx, {
+    route: { provider: 'p', model: 'm', reasoningEffort: 'low' },
+    messages: [],
+    timeoutMs: 1000,
+  })
+  assert.equal(result.text, 'inherited reply')
+  assert.equal(attempts, 2)
+  assert.equal(ctx.calls[0].reasoningEffort, 'low')
+  assert.equal('reasoningEffort' in ctx.calls[1], false, 'the fallback request must inherit')
+  assert.equal(LLM_RETRY.maxAttempts, 2, 'the effort fallback does not consume the transport budget')
+})
+
+test('streamText: a thrown unsupported-effort error also falls back once', async () => {
+  let attempts = 0
+  const ctx = makeCtx({
+    handler: (options) => {
+      attempts += 1
+      if (options.reasoningEffort !== undefined) {
+        const error = new Error('DeepSeek Messages does not support reasoning effort medium')
+        error.code = 'UNSUPPORTED_REASONING_EFFORT'
+        throw error
+      }
+      return chunks(reply('ok'))
+    },
+  })
+  const result = await streamText(ctx, {
+    route: { provider: 'p', model: 'm', reasoningEffort: 'medium' },
+    messages: [],
+    timeoutMs: 1000,
+  })
+  assert.equal(result.text, 'ok')
+  assert.equal(attempts, 2)
+  assert.equal('reasoningEffort' in ctx.calls[1], false)
+  assert.equal(ctx.calls.length, 2)
+})
+
 test('streamText: does not retry a non-retryable failure', async () => {
   let attempts = 0
   const ctx = makeCtx({

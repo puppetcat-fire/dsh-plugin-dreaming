@@ -55,9 +55,9 @@ user/agent ── skill ─┤ tools/pre-execute                        │
                         └─────────────────────┘
 ```
 
-### 1. Probe：在加载时同步预测
+### 1. Probe：在加载时并行预测
 
-`tools/pre-execute` 里在 skill 真正执行前登记一个 episode，并**并发**发起一次受预算约束的 LLM 调用（默认 `probe.mode = 'inline'`，直接 `ctx.llm.stream`，不创建子会话、不污染对话历史）。它返回结构化预测：
+`tools/pre-execute` 里在 skill 真正执行前登记一个 episode，并**并发**发起一个受预算约束的预测子任务（默认 `probe.mode = 'subagent'`，通过 `ctx.subagents.startActivation({ delivery: 'caller' })` 跑一个真实子代理；`inline` 则直接 `ctx.llm.stream`）。它返回结构化预测：
 
 - `fit`（0–1）：这个 skill 对该任务是否合适、是否足够；
 - `expected_use`：预期模型会用它做哪些具体步骤；
@@ -66,7 +66,7 @@ user/agent ── skill ─┤ tools/pre-execute                        │
 - `capability_gap`：任务需要、但 skill 可能实际不提供的能力；
 - `cheaper_alternative`：不加载它也能完成时更便宜的路径。
 
-> 为什么默认不是子 agent：一个完整子 agent 的固定提示 + 工具 schema + 多步推理，通常比它想省下的 skill 正文更贵。Dreaming 的目标是省 token，所以探针必须是**单次、低温度、结构化、可采样**的调用。`probe.mode = 'subagent'` 仍可用，供明确需要 agent 形态观察者的场景。
+> 默认用子代理：预测和判定都跑在 caller-delivery 的子任务里，skill 调用本身不等它们（`probe.attachDeadlineMs` 默认 0）。子代理不可用、超时或输出为空时自动回退到单次 inline 调用，功能不丢。`inline` 更便宜，适合成本敏感的场景。
 
 ### 2. 观察真实结果
 
@@ -74,7 +74,7 @@ user/agent ── skill ─┤ tools/pre-execute                        │
 
 ### 3. Judge：预期 vs 现实
 
-回合结束后，一次便宜的判定调用产出：
+回合结束后，一次判定调用产出（默认 `judge.mode = 'subagent'`，同样通过 caller-delivery 子代理；失败回退 inline）：
 
 - `score`（0–100）与 `verdict`（matched / partial / missed / misapplied）；
 - `predictionAccuracy`：预测与实际的吻合度；
@@ -105,8 +105,9 @@ user/agent ── skill ─┤ tools/pre-execute                        │
 - **系统提示中的全局段落**：`Dreaming · capability awareness`，只在有足够样本时出现，最多 `prompt.maxSkills` 行，明确标注"这是观测到的倾向，不覆盖 skill 自身指令"。
 - **skill 结果注解**：skill 加载完成后，在结果末尾追加一段（≤ `prompt.annotationMaxChars`）：
   - 该 skill 的历史 fit 准确率 / 意识强度 / 浪费率；
-  - 本次 probe 的预期用法、陷阱与更便宜的替代路径（若在 `probe.attachDeadlineMs` 内完成）；
-  - 学到的"不要用于 / 前置条件"。
+  - 本次 probe 的预期用法、陷阱与更便宜的替代路径（只有显式设置 `probe.attachDeadlineMs > 0` 并等到预测时才附上；默认 0 不阻塞 skill 调用，预测仍会记录给 judge）；
+  - 学到的"不要用于 / 前置条件"；
+  - 首次加载没有历史、也没有可用预测时，只追加一行 `first observation` 提示，不编造指标。
   
   模型是在**读完 skill 正文之后、动手之前**看到这段内容的，因此能立即调整。
 
@@ -164,11 +165,14 @@ dsh plugin --profile <profile> add git+https://github.com/puppetcat-fire/dsh-plu
 | `enabled` | `true` | 总开关 |
 | `dataDir` | `''` | 数据目录；空 = `$DSH_HOME/dreaming` |
 | `probe.enabled` | `true` | 是否在 skill 加载时预测 |
-| `probe.mode` | `'inline'` | `inline`（推荐，便宜）或 `subagent` |
+| `probe.mode` | `'subagent'` | `subagent`（默认，真子代理）或 `inline`（更便宜，失败时自动回退到它） |
 | `probe.sampleRate` | `1` | 采样率；有已知缺口的 skill 始终探测 |
-| `probe.attachDeadlineMs` | `1500` | skill 结果等待预测的最长时间，超时只附历史 |
+| `probe.reasoningEffort` | `'low'` | probe 的推理档位：`off`/`low`/`high`/`max`；空 = 继承会话路由（DeepSeek 不接受 `medium`） |
+| `probe.attachDeadlineMs` | `0` | skill 结果等待本次预测的最长时间；0 = 不阻塞调用（推荐），预测仍会记录并交给 judge |
 | `probe.maxPerHour` | `120` | 每小时探测上限 |
 | `judge.enabled` | `true` | 是否判定 |
+| `judge.mode` | `'subagent'` | `subagent`（默认）或 `inline`，失败自动回退 |
+| `judge.reasoningEffort` | `'low'` | judge 的推理档位；空 = 继承会话路由 |
 | `observe.maxTurnExtensionMs` | `600000` | 观察窗口硬上限 |
 | `prompt.awarenessSection` | `true` | 是否注入全局能力自知段落 |
 | `prompt.annotateSkillResult` | `true` | 是否在 skill 结果后追加注解 |
@@ -264,7 +268,7 @@ node test/store.test.mjs
 - **本地信任边界**：`/dreaming/api/` 与普通 loopback 路由一样没有额外鉴权（POST 有 Origin 校验）。它只在 `127.0.0.1` 上暴露；数据目录与备份属于本机用户，不要把 profile 的监听地址改成非 loopback 而不加前置鉴权。
 - **`POST /dreaming/api/dream/run` 的 runId**：运行是异步的，接口立即返回 `accepted:true`；`runId` 可能为 `null`，实际运行 id 以随后刷新的梦境日志为准。
 - **判断依赖模型质量**：judge 的分数是相对信号，用于趋势与优先级，不应被当作绝对真值。
-- **子 agent probe**：`probe.mode = 'subagent'` 会创建真实子会话，成本显著更高，且受委派深度/容量限制；失败会自动回退到 inline。
+- **子代理开销**：默认 probe/judge 都走 caller-delivery 子代理，会创建真实子会话，成本明显高于 inline，且受委派深度/容量限制；任何失败都会自动回退到 inline。
 
 ## 许可证
 

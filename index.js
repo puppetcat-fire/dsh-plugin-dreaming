@@ -21,7 +21,7 @@ import { computeOverall, renderSkillLine } from './lib/stats.js'
 import { EpisodeTracker } from './lib/episode.js'
 import { DreamEngine } from './lib/dream.js'
 import { DreamScheduler } from './lib/scheduler.js'
-import { mergeLearnings, renderPromptSection, renderSkillAnnotation } from './lib/guidance.js'
+import { mergeLearnings, renderFirstObservation, renderPromptSection, renderSkillAnnotation } from './lib/guidance.js'
 import { installApi } from './lib/api.js'
 import { readSkillFile, revertEdit as revertSkillEdit } from './lib/skill-edits.js'
 import { oneLine, safeError, truncate } from './lib/util.js'
@@ -211,15 +211,23 @@ export function apply(ctx, rawConfig) {
         ? decision.content
         : (Array.isArray(result?.content) ? result.content : null)
       if (baseContent === null) return decision
-      const episode = await raceDeadline(
-        tracker.probePromiseFor(exec.callId, exec.agent?.id),
-        config.probe.attachDeadlineMs,
-        logger,
-      )
+      // The skill result must not wait for the probe: annotation is history/instant by default.
+      // `probe.attachDeadlineMs > 0` opts back into a bounded wait for the same-call prediction.
+      const attachDeadlineMs = Math.max(0, Number(config.probe.attachDeadlineMs) || 0)
+      const episode = attachDeadlineMs > 0
+        ? await raceDeadline(
+            tracker.probePromiseFor(exec.callId, exec.agent?.id),
+            attachDeadlineMs,
+            logger,
+          )
+        : undefined
       // The probe may still be running when the model is about to read the skill result. Even
       // then, historical awareness and learned boundaries are immediately available: derive the
       // skill name from the call arguments instead of waiting for the episode.
       const skillName = episode?.skill ?? (typeof exec.arguments?.name === 'string' ? exec.arguments.name : undefined)
+      // A skill belief exists only because pre-execute registered a skill call (this one, or an
+      // earlier load of the same skill), so it is the minimum evidence that this load is ours to
+      // describe. A call the plugin never observed has no belief and stays silent.
       const skillState = skillName !== undefined ? store.getSkill(skillName) : undefined
       if (skillState === undefined) return decision
       const annotation = renderSkillAnnotation({
@@ -227,11 +235,18 @@ export function apply(ctx, rawConfig) {
         prediction: episode?.prediction ?? null,
         config,
       })
-      if (typeof annotation !== 'string' || annotation.trim().length === 0) return decision
+      // A first load has neither judged history nor (yet) a probe prediction, so the measured
+      // annotation is legitimately empty. Say only that the load was seen and is being recorded;
+      // never fall back to inventing a metric, and never replace a measured annotation with the stub.
+      const text =
+        typeof annotation === 'string' && annotation.trim().length > 0
+          ? annotation
+          : renderFirstObservation(skillName)
+      if (text.length === 0) return decision
       const budget = Math.max(200, Math.min(config.prompt.annotationMaxChars, CAPS.skillAnnotationChars))
-      const bounded = truncate(annotation, budget)
+      const bounded = truncate(text, budget)
       logger.debug?.(
-        `dreaming: annotated skill result for ${skillName} (${bounded.length} chars, ${CAPS.skillAnnotationChars} cap)`,
+        `dreaming: annotated skill result for ${skillName ?? 'unknown'} (${bounded.length} chars, ${CAPS.skillAnnotationChars} cap)`,
       )
       return {
         ...decision,

@@ -4,6 +4,7 @@ import { CAPS } from '../lib/constants.js'
 import {
   emptyLearned,
   mergeLearnings,
+  renderFirstObservation,
   renderPromptSection,
   renderSkillAnnotation,
   sanitizeText,
@@ -198,4 +199,28 @@ test('renderSkillAnnotation honors config caps and strips control characters', (
   assert.ok(text.length <= 260, `annotation too long: ${text.length}`)
   assert.ok(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/.test(text))
   assert.ok(text.startsWith('[dreaming]'))
+})
+
+test('renderFirstObservation makes one bounded, metric-free claim', () => {
+  const text = renderFirstObservation('office-xlsx')
+  assert.equal(
+    text,
+    '[dreaming] first observation for office-xlsx — no measured history yet; recording this turn.',
+  )
+  assert.equal(text.split('\n').length, 1, 'must stay a single line')
+  assert.ok(text.length <= CAPS.skillAnnotationChars)
+  assert.ok(!/consciousness|fit accuracy|waste|\bn=\d/i.test(text), 'the fallback must not invent a metric')
+})
+
+test('renderFirstObservation sanitizes the skill name and is empty without a name', () => {
+  assert.equal(renderFirstObservation(''), '')
+  assert.equal(renderFirstObservation('   '), '')
+  assert.equal(renderFirstObservation(undefined), '')
+  assert.equal(renderFirstObservation(null), '')
+  const dirty = renderFirstObservation('bad\u001b[31m\nname')
+  assert.match(dirty, /first observation for bad \[31m name/)
+  assert.equal(dirty.split('\n').length, 1)
+  assert.ok(!/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/.test(dirty))
+  const long = renderFirstObservation('x'.repeat(500))
+  assert.ok(long.length <= CAPS.skillAnnotationChars)
 })

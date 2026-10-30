@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import {
   DEFAULTS,
+  REASONING_EFFORTS,
   buildConfigSchema,
   cloneDefaults,
   materialize,
@@ -13,7 +14,11 @@ import {
 test('defaults are a complete, plain JSON tree', () => {
   const clone = cloneDefaults()
   assert.deepEqual(clone, DEFAULTS)
-  assert.equal(DEFAULTS.probe.mode, 'inline')
+  assert.equal(DEFAULTS.probe.mode, 'subagent')
+  assert.equal(DEFAULTS.judge.mode, 'subagent')
+  assert.equal(DEFAULTS.probe.reasoningEffort, 'low')
+  assert.equal(DEFAULTS.probe.attachDeadlineMs, 0)
+  assert.equal(DEFAULTS.judge.reasoningEffort, 'low')
   assert.equal(DEFAULTS.dream.time, '03:30')
   assert.deepEqual(DEFAULTS.dream.editableSources, ['user-dsh', 'user-agents'])
   assert.equal(DEFAULTS.dream.autoApply, false)
@@ -51,9 +56,58 @@ test('invalid oneOf values fall back to the default and warn', () => {
     probe: { mode: 'psychic' },
     dream: { mode: 'daydream' },
   })
-  assert.equal(config.probe.mode, 'inline')
+  assert.equal(config.probe.mode, 'subagent')
   assert.equal(config.dream.mode, 'auto')
   assert.equal(warnings.length, 2)
+})
+
+test('probe and judge reasoning effort default to low on the route object', () => {
+  assert.deepEqual(REASONING_EFFORTS, ['', 'off', 'low', 'high', 'max'])
+  assert.equal(DEFAULTS.probe.reasoningEffort, 'low')
+  assert.equal(DEFAULTS.judge.reasoningEffort, 'low')
+  // probe.js/judge.js only forward `config.<section>.model` to resolveRoute, so the default is
+  // folded into that route object as well.
+  assert.equal(DEFAULTS.probe.model.reasoningEffort, 'low')
+  assert.equal(DEFAULTS.judge.model.reasoningEffort, 'low')
+})
+
+test('an explicit reasoning effort is folded into the route probe/judge already forward', () => {
+  const { config, warnings } = normalizeConfig({
+    probe: { reasoningEffort: 'high' },
+    judge: { reasoningEffort: 'off' },
+  })
+  assert.equal(config.probe.model.reasoningEffort, 'high')
+  assert.equal(config.judge.model.reasoningEffort, 'off')
+  assert.deepEqual(warnings, [])
+})
+
+test('a route-level reasoning effort stays authoritative over the top-level field', () => {
+  const { config } = normalizeConfig({ probe: { model: { reasoningEffort: 'max' } } })
+  assert.equal(config.probe.reasoningEffort, 'low')
+  assert.equal(config.probe.model.reasoningEffort, 'max')
+})
+
+test('empty reasoning effort means inherit for both sections', () => {
+  const { config, warnings } = normalizeConfig({ probe: { reasoningEffort: '' }, judge: { reasoningEffort: '' } })
+  assert.equal(config.probe.reasoningEffort, '')
+  assert.equal(config.probe.model.reasoningEffort, '')
+  assert.equal(config.judge.reasoningEffort, '')
+  assert.equal(config.judge.model.reasoningEffort, '')
+  assert.deepEqual(warnings, [])
+})
+
+test('an effort the installed DeepSeek adapter rejects warns and falls back', () => {
+  const { config, warnings } = normalizeConfig({
+    probe: { reasoningEffort: 'medium' },
+    judge: { reasoningEffort: 'extreme' },
+  })
+  assert.equal(config.probe.reasoningEffort, 'low')
+  assert.equal(config.judge.reasoningEffort, 'low')
+  assert.equal(config.probe.model.reasoningEffort, 'low')
+  assert.equal(config.judge.model.reasoningEffort, 'low')
+  assert.equal(warnings.length, 2)
+  assert.ok(warnings.some((line) => line.includes('probe.reasoningEffort')))
+  assert.ok(warnings.some((line) => line.includes('judge.reasoningEffort')))
 })
 
 test('invalid dream time and time zone fall back', () => {
@@ -137,5 +191,8 @@ test('buildConfigSchema drives every spec field through a fake schemastery', () 
   assert.equal(schema.kind, 'object')
   assert.ok(Object.hasOwn(schema.shape, 'probe'))
   assert.ok(Object.hasOwn(schema.shape.probe.shape, 'mode'))
+  assert.ok(Object.hasOwn(schema.shape.probe.shape, 'reasoningEffort'))
+  assert.ok(Object.hasOwn(schema.shape.judge.shape, 'reasoningEffort'))
   assert.ok(calls.some((line) => line.includes('boolean.default(true)')))
+  assert.ok(calls.some((line) => line.includes('union.default("low")')))
 })

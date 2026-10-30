@@ -62,9 +62,9 @@ user/agent ── skill ─┤ tools/pre-execute                        │
                          └─────────────────────┘
 ```
 
-### 1. Probe — predict at load time
+### 1. Probe — predict at load time, in parallel
 
-Inside `tools/pre-execute` the plugin registers an episode before the skill runs and starts a budgeted LLM call concurrently (default `probe.mode = 'inline'`; it uses `ctx.llm.stream` directly and does not create a sub-session or pollute the conversation). The probe returns a structured prediction:
+Inside `tools/pre-execute` the plugin registers an episode before the skill runs and starts a budgeted prediction subtask concurrently (default `probe.mode = 'subagent'`, a real caller-delivered child via `ctx.subagents.startActivation({ delivery: 'caller' })`; `inline` uses `ctx.llm.stream` directly). The probe returns a structured prediction:
 
 - `fit` (0–1): whether and how well the skill fits this task;
 - `expected_use`: the concrete steps the model is expected to take;
@@ -73,7 +73,7 @@ Inside `tools/pre-execute` the plugin registers an episode before the skill runs
 - `capability_gap`: a capability the task needs that the skill may not actually provide;
 - `cheaper_alternative`: a cheaper path when the skill is not needed.
 
-> Why not a sub-agent by default: a full sub-agent's fixed prompt + tool schemas + multi-step reasoning usually costs more than the skill body it is meant to save. The probe is a single, low-temperature, structured, sampled call. `probe.mode = 'subagent'` remains available for cases that genuinely need an agent-shaped observer.
+> Subagents are the default: both prediction and judgement run as caller-delivered subtasks, and the skill call never waits for them (`probe.attachDeadlineMs` defaults to 0). If the service is unavailable, times out, or returns no text, the plugin falls back to a single inline call, so behaviour never disappears. `inline` is cheaper for cost-sensitive setups.
 
 ### 2. Observe the real outcome
 
@@ -81,7 +81,7 @@ Inside `tools/pre-execute` the plugin registers an episode before the skill runs
 
 ### 3. Judge — expectation vs reality
 
-After the turn, one cheap judge call produces:
+After the turn, one judge call produces (default `judge.mode = 'subagent'`, also a caller-delivered child; falls back to inline):
 
 - `score` (0–100) and `verdict` (`matched` / `partial` / `missed` / `misapplied`);
 - `predictionAccuracy`: agreement between prediction and reality;
@@ -112,8 +112,9 @@ Each skill keeps a belief: load count, verdict distribution, fit history, cost, 
 - **A global system-prompt section**, `Dreaming · capability awareness`, appears only when there is enough evidence, at most `prompt.maxSkills` lines, explicitly marked as observed tendency and not overriding the skill's own instructions.
 - **Skill-result annotation**: after a skill loads, up to `prompt.annotationMaxChars` characters are appended to the result:
   - the skill's measured fit accuracy / consciousness / waste rate;
-  - this call's predicted use, pitfalls and cheaper alternative (when the probe finishes inside `probe.attachDeadlineMs`);
-  - the learned “not for / preconditions”.
+  - this call's predicted use, pitfalls and cheaper alternative (only when `probe.attachDeadlineMs > 0` opts into waiting; the default 0 never blocks the skill result, and the prediction is still recorded for the judge);
+  - the learned “not for / preconditions”;
+  - a single `first observation` line when a first load has neither history nor a usable prediction — no invented metrics.
 
 The model sees this after reading the skill body and before acting, so it can adjust immediately.
 
@@ -169,11 +170,14 @@ All configuration lives in the profile's `cordis.patch.yml` (or a home patch). T
 | `enabled` | `true` | Master switch |
 | `dataDir` | `''` | Data directory; empty = `$DSH_HOME/dreaming` |
 | `probe.enabled` | `true` | Predict on skill load |
-| `probe.mode` | `'inline'` | `inline` (recommended, cheap) or `subagent` |
+| `probe.mode` | `'subagent'` | `subagent` (default, real child) or `inline` (cheaper, used as the fallback) |
 | `probe.sampleRate` | `1` | Sampling rate; known-gap skills are always probed |
-| `probe.attachDeadlineMs` | `1500` | How long the skill result waits for the probe; on timeout only history is attached |
+| `probe.reasoningEffort` | `'low'` | `off` / `low` / `high` / `max`; empty inherits the session route (DeepSeek rejects `medium`) |
+| `probe.attachDeadlineMs` | `0` | Max wait for the same-call prediction; 0 (default) never blocks the skill call, and the prediction is still recorded for the judge |
 | `probe.maxPerHour` | `120` | Hourly probe cap |
 | `judge.enabled` | `true` | Judge after the turn |
+| `judge.mode` | `'subagent'` | `subagent` (default) or `inline`; falls back automatically |
+| `judge.reasoningEffort` | `'low'` | `off` / `low` / `high` / `max`; empty inherits |
 | `observe.maxTurnExtensionMs` | `600000` | Hard cap on the observation window |
 | `prompt.awarenessSection` | `true` | Inject the global awareness section |
 | `prompt.annotateSkillResult` | `true` | Annotate the skill result |
@@ -269,7 +273,7 @@ node test/store.test.mjs
 - **Local trust boundary**: `/dreaming/api/` has no extra auth beyond the loopback binding (POST has an Origin check). Do not expose the profile's listener on a non-loopback address without adding authentication, and treat the data directory and backups as local user data.
 - **`POST /dreaming/api/dream/run` runId**: the run is asynchronous; the call returns `accepted:true` immediately and `runId` may be `null` — the actual run id is in the next journal refresh.
 - **Judge quality depends on the model**: scores are relative signals for trends and prioritization, not absolute truth.
-- **Sub-agent probe**: `probe.mode = 'subagent'` creates a real sub-session, costs significantly more and is subject to delegation depth/capacity; failures fall back to inline.
+- **Subagent overhead**: by default both probe and judge run as caller-delivered child sessions, which costs significantly more than inline and is subject to delegation depth/capacity; any failure falls back to inline.
 
 ## License
 

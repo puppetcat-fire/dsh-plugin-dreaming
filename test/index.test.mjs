@@ -191,6 +191,60 @@ test('post-execute returns the downstream decision unchanged when there is nothi
   }
 })
 
+test('a first skill load gets the first-observation stub exactly once', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dreaming-index-first-'))
+  const { ctx, listeners, cleanups } = createFakeContext()
+  try {
+    apply(ctx, { dataDir: dir, probe: { enabled: false }, judge: { enabled: false }, dream: { enabled: false } })
+    const pre = listeners.get('tools/pre-execute')[0]
+    const post = listeners.get('tools/post-execute')[0]
+    const exec = skillExec({ callId: 'call-first', arguments: { name: 'fresh-skill' } })
+    await pre(exec, async () => ({ kind: 'allow' }))
+    const body = { type: 'text', text: '<skill_content>body</skill_content>' }
+    const decision = await post(exec, { isError: false, content: [body] }, async () => ({ kind: 'accept' }))
+    assert.equal(decision.kind, 'accept')
+    assert.equal(decision.content.length, 2, 'exactly one text block is appended')
+    assert.equal(decision.content[0], body)
+    assert.equal(
+      decision.content[1].text,
+      '[dreaming] first observation for fresh-skill — no measured history yet; recording this turn.',
+    )
+    assert.equal((decision.content[1].text.match(/\[dreaming\]/g) ?? []).length, 1, 'never duplicated')
+
+    // An errored load is never annotated, even when the stub would apply.
+    const downstream = { kind: 'accept', content: [body] }
+    const errored = await post(exec, { isError: true, content: [body] }, async () => downstream)
+    assert.deepEqual(errored, downstream)
+  } finally {
+    for (const cleanup of cleanups) cleanup()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('the first-observation stub is skipped when annotation is disabled', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dreaming-index-first-off-'))
+  const { ctx, listeners, cleanups } = createFakeContext()
+  try {
+    apply(ctx, {
+      dataDir: dir,
+      probe: { enabled: false },
+      judge: { enabled: false },
+      dream: { enabled: false },
+      prompt: { annotateSkillResult: false },
+    })
+    const pre = listeners.get('tools/pre-execute')[0]
+    const post = listeners.get('tools/post-execute')[0]
+    const exec = skillExec({ callId: 'call-first-off', arguments: { name: 'fresh-skill' } })
+    await pre(exec, async () => ({ kind: 'allow' }))
+    const body = { type: 'text', text: '<skill_content>body</skill_content>' }
+    const decision = await post(exec, { isError: false, content: [body] }, async () => ({ kind: 'accept' }))
+    assert.equal(decision.content, undefined, 'the stub must not bypass prompt.annotateSkillResult=false')
+  } finally {
+    for (const cleanup of cleanups) cleanup()
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('the model-facing tool reports an empty store without throwing', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dreaming-index-'))
   const { ctx, tools, cleanups } = createFakeContext()
@@ -345,6 +399,11 @@ test('the skill result is annotated with learned awareness when a belief exists'
     assert.equal(decision.content.length, 2, 'annotation must be appended when the default accept carries no content')
     assert.equal(decision.content[0], body)
     assert.match(decision.content[1].text, /dreaming/i)
+    assert.ok(
+      !decision.content[1].text.includes('first observation'),
+      'a measured annotation must not be replaced by the stub',
+    )
+    assert.equal((decision.content[1].text.match(/\[dreaming\]/g) ?? []).length, 1, 'normal annotation is appended once')
   } finally {
     for (const cleanup of cleanups) cleanup()
     rmSync(dir, { recursive: true, force: true })

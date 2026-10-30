@@ -47,12 +47,14 @@ tokens down**. Every design choice below is measured against that.
 A full child agent per skill call would cost more tokens (preset prompt + tool schemas + multi-step
 reasoning) than the skill body it is meant to save. That contradicts the product. So:
 
-- **Probe and judge use `ctx.llm.stream(...)` directly** — one bounded, temperature-low, JSON-only call
-  each, no child session, no tools, no history pollution. Typical budget: probe ≤ ~900 output tokens,
-  judge ≤ ~1200. The probe's input is a compact, truncated context pack (≤ ~4 k chars).
-- **Optional probe backend**: `probe.mode = 'inline' | 'subagent'`. `'inline'` is the default and the
-  recommended mode. `'subagent'` starts a real caller-delivery child via `ctx.subagents.startActivation`
-  for users who explicitly want an agent-shaped observer; it is documented as more expensive.
+- **Probe and judge default to caller-delivered subagents** (`probe.mode` / `judge.mode` default
+  `'subagent'`): a real child via `ctx.subagents.startActivation({ delivery: 'caller' })`, bounded and
+  non-blocking. If the service is unavailable, times out, or returns no text, the call falls back to a
+  single `ctx.llm.stream(...)` call. `inline` remains selectable for cost-sensitive setups. Typical
+  budget: probe ≤ ~900 output tokens, judge ≤ 1400.
+- **The skill result never waits for the probe** (`probe.attachDeadlineMs` defaults to 0); annotation is
+  history/immediate, while the prediction is recorded for the later judge. A positive value opts back
+  into a bounded same-call wait.
 - **Dream is inline in v1** (`dream.mode = 'auto' | 'subagent' | 'inline'`): the nightly scheduler runs
   without a guaranteed live parent Agent, so v1 always journals `mode: 'inline'` (truthfully) and logs
   one warning when a subagent mode was requested. The inline dreamer receives the bounded skill file and
@@ -337,14 +339,18 @@ longer matches `after.sha256` (manual edits happened) and marks `conflict` inste
   triggering agent, `delivery: 'caller'`, prompt = `buildProbeInput` rendered as one text block, then
   `await activation.result` with a timeout and `await activation.dispose()` in `finally`. Parse the
   final assistant text as JSON. If `subagents` is unavailable, fall back to inline.
-- Attaches a promise to `episode._probePromise` so `tools/post-execute` can race it against a short
-  deadline. Never rejects to the caller; failures set `probe.status` and leave `prediction = null`.
+- Attaches a promise to `episode._probePromise` so `episode.js` can await it before the post-turn judge.
+  `tools/post-execute` does not wait for it by default, so the skill result is never delayed; a positive
+  `probe.attachDeadlineMs` opts into a bounded same-call wait. Never rejects to the caller; failures set
+  `probe.status` and leave `prediction = null`.
 
 ### `judge.js`
 - `async judgeEpisode({ ctx, config, store, episode, session })` → fills `episode.judge` and `cost`;
   no-op when `judge.enabled` is false or the episode has no prediction and `judge.judgeWithoutProbe` is
   false. Reads the trace collected by `episode.js` (never re-reads a closed session).
-- One `streamText` call, `temperature: 0.1`. Validates with `validateJudge`. A reply cut off by the
+- One `streamText` call (or, with `judge.mode = 'subagent'` — the default — one caller-delivered
+  subagent activation via `lib/subagent.js`, falling back to `streamText` on any failure),
+  `temperature: 0.1`. Validates with `validateJudge`. A reply cut off by the
   output cap is repaired deterministically first (`parseJsonLoose` then `repairJsonLoose`); otherwise
   retries once with a compact "return only JSON, at most 2 mismatches" reminder, then records
   `judge.status = 'invalid'`.

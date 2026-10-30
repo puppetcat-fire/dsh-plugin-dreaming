@@ -293,6 +293,51 @@ test('judgeEpisode: a reply truncated by the output cap is repaired without a re
   assert.equal(episode.flags.truncated, true)
 })
 
+test('judgeEpisode: subagent mode runs the judge as a caller-delivered child and disposes it', async () => {
+  const activations = []
+  let disposed = 0
+  const ctx = createCtx({ handler: () => assert.fail('inline judge must not run when the subagent succeeds') })
+  ctx.subagents = {
+    async startActivation(options) {
+      activations.push(options)
+      return {
+        result: Promise.resolve({ output: JSON.stringify(validJudgeReply) }),
+        dispose: async () => { disposed += 1 },
+      }
+    },
+  }
+  const episode = makeEpisode()
+  await judgeEpisode({
+    ctx,
+    config: makeConfig({ judge: { mode: 'subagent', subagentProvider: 'spawn' } }),
+    store: null,
+    episode,
+  })
+  assert.equal(episode.judge.status, 'ok')
+  assert.equal(episode.judge.score, 34)
+  assert.equal(episode.judge.model, 'subagent/spawn')
+  assert.equal(ctx.calls.length, 0, 'inline model must not be called')
+  assert.equal(activations.length, 1)
+  assert.equal(activations[0].delivery, 'caller')
+  assert.equal(activations[0].label, 'dreaming judge')
+  assert.match(activations[0].request.prompt[0].text, /strict capability judge/)
+  assert.equal(disposed, 1)
+})
+
+test('judgeEpisode: subagent judge falls back to inline when the service fails', async () => {
+  const ctx = createCtx({ handler: () => makeReply(validJudgeReply) })
+  ctx.subagents = {
+    async startActivation() {
+      throw new Error('delegation unavailable')
+    },
+  }
+  const episode = makeEpisode()
+  await judgeEpisode({ ctx, config: makeConfig({ judge: { mode: 'subagent' } }), store: null, episode })
+  assert.equal(episode.judge.status, 'ok')
+  assert.equal(episode.judge.model, 'prov-1/model-1')
+  assert.equal(ctx.calls.length, 1)
+})
+
 test('repairJsonLoose: closes a truncated object, keeps the completed prefix, rejects garbage', () => {
   const full = JSON.stringify(validJudgeReply)
   const repaired = repairJsonLoose(full.slice(0, full.indexOf('"mismatches"') + 40))
