@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-dreaming",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Raises skill consciousness strength: probes every skill call, records what really happened, and improves skill descriptions and boundaries nightly so skills are invoked precisely and tokens are not wasted.",
   "type": "module",
   "license": "MIT",

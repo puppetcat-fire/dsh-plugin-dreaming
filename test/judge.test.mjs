@@ -11,6 +11,7 @@ import { DEFAULTS } from '../lib/config.js'
 import { emptySkillState } from '../lib/stats.js'
 import { applyEpisodeToSkill } from '../lib/stats.js'
 import { buildGuidanceFindings, computeEpisodeCost, emptyJudgeRecord, estimateTraceTokens, judgeEpisode } from '../lib/judge.js'
+import { repairJsonLoose } from '../lib/util.js'
 
 const silentLogger = () => {
   const lines = { debug: [], info: [], warn: [], error: [] }
@@ -275,6 +276,31 @@ test('judgeEpisode: invalid JSON retries once with a reminder, then succeeds', a
   assert.ok(retryMessages.length >= 2)
   const lastText = retryMessages[retryMessages.length - 1].content.map((block) => block.text).join(' ')
   assert.match(lastText, /ONLY one JSON object/)
+  assert.match(lastText, /at most 2 mismatches/)
+})
+
+test('judgeEpisode: a reply truncated by the output cap is repaired without a retry', async () => {
+  const full = JSON.stringify(validJudgeReply)
+  const truncated = full.slice(0, full.indexOf('"mismatches"') + 40)
+  const ctx = createCtx({ handler: () => makeReply(truncated) })
+  const store = createStore([emptySkillState({ name: 'office-xlsx' })])
+  const episode = makeEpisode()
+  await judgeEpisode({ ctx, config: makeConfig({ judge: { retryInvalidOnce: true } }), store, episode })
+  assert.equal(ctx.calls.length, 1, 'a recoverable truncation must not spend a retry')
+  assert.equal(episode.judge.status, 'ok')
+  assert.equal(episode.judge.score, 34)
+  assert.equal(episode.judge.verdict, 'misapplied')
+  assert.equal(episode.flags.truncated, true)
+})
+
+test('repairJsonLoose: closes a truncated object, keeps the completed prefix, rejects garbage', () => {
+  const full = JSON.stringify(validJudgeReply)
+  const repaired = repairJsonLoose(full.slice(0, full.indexOf('"mismatches"') + 40))
+  assert.equal(repaired.score, 34)
+  assert.equal(repaired.verdict, 'misapplied')
+  assert.ok(Array.isArray(repaired.mismatches))
+  assert.equal(repairJsonLoose('this is not json'), undefined)
+  assert.equal(repairJsonLoose('{"score":'), undefined)
 })
 
 test('judgeEpisode: two invalid replies record status invalid and do not judge the skill', async () => {

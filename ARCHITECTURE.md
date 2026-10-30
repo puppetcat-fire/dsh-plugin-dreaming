@@ -1,13 +1,13 @@
 # Dreaming — architecture and contracts
 
-Status: implementation contract (v1), written against DSH 0.2.1-rc.2 and verified on 0.2.1-rc.3 with the
+Status: implementation contract (v1), written against DSH 0.2.1-rc.2 and verified on 0.2.1-rc.5 with the
 Web profile. This document is the single source of truth for module boundaries.
 
 Compatibility baseline: extension points and data contracts below were re-verified live on
-`0.2.1-rc.3` (2026-10-24). The seven Harness packages this plugin depends on
+`0.2.1-rc.5` (2026-10-30). The seven Harness packages this plugin depends on
 (`dsh-tools`, `dsh-system-prompt`, `dsh-skill`, `dsh-session`, `dsh-agent`, `dsh-llm`,
-`dsh-settings`) are unchanged between `0.2.1-rc.2` and `0.2.1-rc.3`; only `package.json`
-versions differ, plus removed build-only `lib/types/*` files.
+`dsh-settings`) are unchanged between `0.2.1-rc.3` and `0.2.1-rc.5`; only `package.json`
+versions differ.
 
 ## 1. What the plugin is for
 
@@ -61,12 +61,12 @@ reasoning) than the skill body it is meant to save. That contradicts the product
 - Everything is **sampled and budgeted**: per-hour probe cap, concurrent-LLM cap, per-day dream token
   budget, adaptive sampling (always probe skills with known gaps, sample healthy skills).
 
-## 3. Verified Harness extension points (0.2.1-rc.3)
+## 3. Verified Harness extension points (0.2.1-rc.5)
 
 Everything below was confirmed with `cordis_inspect_query` and package-source diffs against the live
 Host. Do not substitute guesses; re-confirm with inspection if the runtime version changes.
 
-Re-checked on `0.2.1-rc.2 → 0.2.1-rc.3` (2026-10-24): every extension point in this table is intact.
+Re-checked on `0.2.1-rc.3 → 0.2.1-rc.5` (2026-10-30): every extension point in this table is intact.
 The plugin's Host packages are byte-identical across the two releases, so a future re-check should
 start with the same seven packages whenever DSH changes them.
 
@@ -344,8 +344,10 @@ longer matches `after.sha256` (manual edits happened) and marks `conflict` inste
 - `async judgeEpisode({ ctx, config, store, episode, session })` → fills `episode.judge` and `cost`;
   no-op when `judge.enabled` is false or the episode has no prediction and `judge.judgeWithoutProbe` is
   false. Reads the trace collected by `episode.js` (never re-reads a closed session).
-- One `streamText` call, `temperature: 0.1`. Validates with `validateJudge`; on invalid JSON retries once
-  with a "return only JSON" reminder, then records `judge.status = 'invalid'`.
+- One `streamText` call, `temperature: 0.1`. Validates with `validateJudge`. A reply cut off by the
+  output cap is repaired deterministically first (`parseJsonLoose` then `repairJsonLoose`); otherwise
+  retries once with a compact "return only JSON, at most 2 mismatches" reminder, then records
+  `judge.status = 'invalid'`.
 - Sets `episode.state = 'judged'`, appends the update, and calls `stats`/`guidance` through the store.
 
 ### `episode.js`
