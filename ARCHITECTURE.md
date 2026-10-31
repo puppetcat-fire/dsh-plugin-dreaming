@@ -359,8 +359,10 @@ longer matches `after.sha256` (manual edits happened) and marks `conflict` inste
 ### `episode.js`
 - `class EpisodeTracker` owns in-memory open episodes keyed by `callId` and a per-session window map.
   - `begin({ exec, sessionId })` → creates the record, resolves skill metadata via `ctx.skills.get`,
-    snapshots the task pack from `session.deriveMessages()` (bounded), starts the probe (fire-and-
-    forget, promise stored), and schedules the observation window.
+    snapshots the task pack from `session.deriveMessages()`; user-role metadata (`runtime-context`,
+    `agent-instructions`, system reminders) is filtered out and the whole derivation is scanned, so a
+    real request that precedes those injected messages is still captured. Starts the probe (fire-and-
+    forget, promise stored) and schedules the observation window.
   - `onToolResult({ exec, result, session })` → records the load outcome and cancels the "never loaded"
     timer.
   - `onSessionEvent(session, event)` → appends to each open window of that session: assistant text,
@@ -509,7 +511,7 @@ Hard caps enforced by code:
 | Judge input | 9000 chars | ≈ 2200 tokens, once per loaded skill |
 | Judge output | 1400 tokens | one JSON object; 900 truncated real verdicts |
 | Dream input | 16000 chars/skill | nightly, budgeted |
-| Dream output | 1800 tokens/skill | nightly, budgeted |
+| Dream output | 2600 tokens/skill | nightly, budgeted; one compact retry on invalid JSON |
 
 The dashboard reports probe+judge spend against estimated waste avoided, so the plugin is honest about
 its own cost. `probe.sampleRate` (default 1.0), `probe.alwaysForGapSkills` and per-hour caps keep the

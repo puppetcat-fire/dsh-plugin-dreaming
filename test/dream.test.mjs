@@ -336,6 +336,27 @@ test('invalid model output is journaled as rejected without throwing', async (t)
   assert.equal(env.store.recentDreams(1)[0].skills[0].reasons.includes('invalid-json'), true)
 })
 
+test('an invalid first dream reply retries once compact and applies the second', async (t) => {
+  const env = makeEnv(t)
+  ensureDemoSkill(env)
+  makeEpisode(env, { id: 'ep_retry' })
+  let calls = 0
+  const ctx = fakeCtx(() => {
+    calls += 1
+    return calls === 1 ? 'this is not json' : JSON.stringify(GOOD_PROPOSAL)
+  })
+  const engine = makeEngine(env, ctx)
+  const record = await engine.run({ trigger: 'manual' })
+  assert.equal(ctx.calls.length, 2)
+  const retryMessages = ctx.calls[1].messages
+  const lastText = retryMessages[retryMessages.length - 1].content.map((block) => block.text).join(' ')
+  assert.match(lastText, /ONLY one compact JSON object/)
+  const entry = record.skills[0]
+  assert.equal(entry.applied, true)
+  assert.equal(entry.status, 'applied')
+  assert.deepEqual(entry.reasons, [])
+})
+
 test('an unlocatable description patch is rejected while a usable body edit still applies', async (t) => {
   const env = makeEnv(t)
   ensureDemoSkill(env)

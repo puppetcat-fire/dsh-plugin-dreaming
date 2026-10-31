@@ -228,7 +228,14 @@ test('onPreExecute: creates an episode, resolves metadata/task, journals it and 
   const tracker = new EpisodeTracker({ ctx, config: makeConfig(), store, logger: ctx.logger })
   t.after(() => tracker.dispose())
   const session = createSession({
-    messages: [userMessage('make me a budget spreadsheet'), assistantMessage('sure, working on it')],
+    messages: [
+      userMessage('make me a budget spreadsheet'),
+      assistantMessage('sure, working on it'),
+      ...Array.from({ length: 45 }, (_, index) => assistantMessage(`step ${index}`)),
+      userMessage('Current runtime context. Snapshot with cwd and policies.'),
+      userMessage('Time sampled while preparing turn 1: 2026-10-31T12:00:00+08:00'),
+      userMessage('<system-reminder> workspace instructions follow </system-reminder>'),
+    ],
     events: [{ type: 'turn/start', data: { turn: 3 } }, { type: 'step/start', data: { turn: 3, step: 1 } }],
   })
   const exec = makeExec()
@@ -242,6 +249,7 @@ test('onPreExecute: creates an episode, resolves metadata/task, journals it and 
   assert.equal(episode.skillMeta.description, 'Build and edit Excel workbooks')
   assert.ok(episode.skillMeta.bodyChars > 0)
   assert.equal(episode.task.userGoal, 'make me a budget spreadsheet')
+  assert.deepEqual(episode.task.recentUser, ['make me a budget spreadsheet'])
   assert.equal(episode.task.cwd, 'C:\\workspace')
   assert.equal(store.calls.appendEpisode.length, 1)
   assert.equal(store.calls.ensureSkill.length, 1)

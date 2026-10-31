@@ -67,6 +67,8 @@ user/agent ── skill ─┤ tools/pre-execute                        │
 - `cheaper_alternative`：不加载它也能完成时更便宜的路径。
 
 > 默认用子代理：预测和判定都跑在 caller-delivery 的子任务里，skill 调用本身不等它们（`probe.attachDeadlineMs` 默认 0）。子代理不可用、超时或输出为空时自动回退到单次 inline 调用，功能不丢。`inline` 更便宜，适合成本敏感的场景。
+>
+> 任务包只取真实用户请求：`runtime-context`、AGENTS/`system-reminder` 这类同为 user 角色的元信息会被跳过，并且扫描整段会话；否则 “Time sampled…” 会冒充用户任务。
 
 ### 2. 观察真实结果
 
@@ -117,7 +119,7 @@ user/agent ── skill ─┤ tools/pre-execute                        │
 
 1. 选取最近 `caseWindowDays` 内判定为 `missed` / `misapplied` / 低分的案例，按 skill 分组（每 skill 最多 `maxCasesPerSkill`，每次最多 `maxSkillsPerRun` 个 skill）；
 2. 构造有界 dream pack：skill 当前文件、当前描述、已学边界、压缩后的案例（预测 + 轨迹 + 判定）；
-3. 让 dreamer 产出结构化提案：`description` 修改、`body` 能力边界段落、可复用规则、置信度；
+3. 让 dreamer 产出结构化提案：`description` 修改、`body` 能力边界段落、可复用规则、置信度；输出上限 2600 token，JSON 解析失败会追加“紧凑输出”提示重试一次，避免长提案被截断后整晚 reject；
 4. **确定性校验**：描述长度/可定位性/置信度阈值/是否移除原有能力声明；任何一项不通过就只记录为建议，不落盘；
 5. 安全应用：只编辑 `dream.editableSources` 白名单内的 **用户级 skill**（默认 `user-dsh`、`user-agents`），路径必须在用户 skill 根目录内（`realpath` 校验），先写备份、再原子替换、校验 sha256；
 6. 把规则合并进该 skill 的 guidance overlay（对不可编辑的 skill 同样生效，这是它们的主要改进途径）；

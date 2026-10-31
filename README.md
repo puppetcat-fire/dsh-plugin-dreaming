@@ -74,6 +74,8 @@ Inside `tools/pre-execute` the plugin registers an episode before the skill runs
 - `cheaper_alternative`: a cheaper path when the skill is not needed.
 
 > Subagents are the default: both prediction and judgement run as caller-delivered subtasks, and the skill call never waits for them (`probe.attachDeadlineMs` defaults to 0). If the service is unavailable, times out, or returns no text, the plugin falls back to a single inline call, so behaviour never disappears. `inline` is cheaper for cost-sensitive setups.
+>
+> The task pack only takes real user requests: user-role metadata such as `runtime-context`, AGENTS instructions and `<system-reminder>` is filtered out, and the whole derivation is scanned — otherwise “Time sampled…” can masquerade as the task.
 
 ### 2. Observe the real outcome
 
@@ -124,7 +126,7 @@ The model sees this after reading the skill body and before acting, so it can ad
 
 1. selects recent (within `caseWindowDays`) `missed` / `misapplied` / low-score cases, grouped by skill (at most `maxCasesPerSkill` cases per skill, `maxSkillsPerRun` skills per run);
 2. builds a bounded dream pack: the current skill file, the current description, learned boundaries, compressed cases;
-3. asks the dreamer for a structured proposal: a `description` edit, a `body` capability-boundary section, reusable rules, confidence;
+3. asks the dreamer for a structured proposal: a `description` edit, a `body` capability-boundary section, reusable rules, confidence; the output cap is 2600 tokens, and invalid JSON gets one compact retry so a long proposal is not rejected wholesale for truncation;
 4. applies **deterministic validation**: description length / locatability / confidence threshold / removal of existing claims — any failure turns the proposal into a suggestion only;
 5. applies safely: only to user-level skills inside `dream.editableSources` (default `user-dsh`, `user-agents`), path-checked against the user skill roots (`realpath`), backup first, atomic replace, sha256 verified;
 6. merges the rules into the skill's guidance overlay (this also improves skills that cannot be edited);
